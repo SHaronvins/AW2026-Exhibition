@@ -1,0 +1,23 @@
+# python
+__pycache__/
+*.pyc
+
+# model
+*.pt
+weights/
+
+# dataset
+dataset/
+obj_images/
+result_live/
+
+# logs
+*.log
+*.txt
+
+# third-party (중요)
+object_pose/kaolin/
+object_pose/pytorch3d/
+
+# fairino example (필요없으면)
+fairino/windows/example/
