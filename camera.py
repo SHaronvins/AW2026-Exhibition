@@ -87,6 +87,11 @@ class MechEyeCamera:
 
         # ---- 텍스처 PLY 저장 ----
         # intentionally disabled (do not write PLY)
+        # show_error(
+        #     self.frame_all_2d_3d.save_textured_point_cloud(FileFormat_PLY, ply_path),
+        #     f"Saved textured PLY → {ply_path}"
+        # )
+
 
         # ---- RGB ----
         frame2d = self.frame_all_2d_3d.frame_2d()
@@ -113,4 +118,4 @@ class MechEyeCamera:
 
     def disconnect(self):
         self.cam.disconnect()
-        print("🔌 Camera disconnected.")
+        print("Camera disconnected.")

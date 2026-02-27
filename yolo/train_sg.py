@@ -4,11 +4,11 @@ from ultralytics import YOLO
 
 def main():
     # 🔥 SEGMENTATION 모델 사용
-    model = YOLO("yolo11s-seg.pt")
+    model = YOLO("yolo11n-seg.pt")
 
     model.train(
         data="dataset.yaml",
-        epochs=100,
+        epochs=60,
         imgsz=1024,
         batch=8,
 

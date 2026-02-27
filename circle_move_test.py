@@ -69,7 +69,7 @@ def compute_rotvec_lookat_vertical(cur, center):
     rotvec, _ = cv2.Rodrigues(R)
     return rotvec.flatten()
 
-rtde_c.moveL([0.485212,-0.080109,0.037221,2.221441, -2.221441, 0.0], 
+rtde_c.moveL([0.440,-0.080,0.060,2.221441, -2.221441, 0.0], 
              0.03, 0.3)
 
 center = rtde_r.getActualTCPPose()

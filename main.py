@@ -1,12 +1,11 @@
 from camera import MechEyeCamera
-from pose_est_cal import run_pose_estimation
+from pose_est_cal_auto import run_pose_estimation
 
 
 
 def main() -> int:
 	cam = MechEyeCamera()
 	cam.connect(None)
-	pose_6d = None
         
 	try:
 		run_pose_estimation(
@@ -20,7 +19,7 @@ def main() -> int:
 			out_width=640,
 			out_height=512,
 			depth_scale=0.001,
-			window_name="Pose Est",
+			window_name="MakinaRocks smart welding automation system",
 			est_refine_iter=5,
 			# on_pose=_on_pose,
 			return_on_estimate=False,

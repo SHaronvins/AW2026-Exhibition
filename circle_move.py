@@ -50,7 +50,7 @@ def circle_move_0(c_x, c_y, dt, T, RADIUS, robot_ctrl, start_pose):
             0.1,
             dt,
             0.1,    
-            100       
+            150       
         )
 
         time.sleep(dt)
@@ -69,17 +69,17 @@ def move_offset_0(final_pose, dt, robot_ctrl, robot_recv):
 
     cur_pose1 = robot_recv.getActualTCPPose()
     offset_pose1 = [cur_pose1[0] + 0.005,cur_pose1[1],cur_pose1[2] + 0.06,cur_pose1[3],cur_pose1[4],cur_pose1[5]]
-    robot_ctrl.moveL(offset_pose1, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose1, 0.20, 0.20)
     time.sleep(0.3)
 
     cur_pose2 = robot_recv.getActualTCPPose()
     offset_pose2 = [cur_pose2[0]-0.055,cur_pose2[1],cur_pose2[2],3.14,0,cur_pose2[5]]
-    robot_ctrl.moveL(offset_pose2, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose2, 0.20, 0.20)
     time.sleep(0.3)
 
     cur_pose3 = robot_recv.getActualTCPPose()
     offset_pose3 = [cur_pose3[0]-0.055,cur_pose3[1],cur_pose3[2],2.221,-2.221,cur_pose3[5]]
-    robot_ctrl.moveL(offset_pose3, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose3, 0.20, 0.20)
     time.sleep(0.3)
 
 def circle_move_1(c_x, c_y, dt, T, RADIUS, robot_ctrl, start_pose):
@@ -108,7 +108,7 @@ def circle_move_1(c_x, c_y, dt, T, RADIUS, robot_ctrl, start_pose):
             0.1,
             dt,
             0.1,    
-            100       
+            150       
         )
 
         time.sleep(dt)
@@ -126,15 +126,15 @@ def move_offset_1(final_pose, dt, robot_ctrl, robot_recv):
 
     cur_pose4 = robot_recv.getActualTCPPose()
     offset_pose4 = [cur_pose4[0] + 0.005,cur_pose4[1],cur_pose4[2] + 0.06,cur_pose4[3],cur_pose4[4],cur_pose4[5]]
-    robot_ctrl.moveL(offset_pose4, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose4, 0.20, 0.20)
     time.sleep(0.3)
 
     cur_pose5 = robot_recv.getActualTCPPose()
     offset_pose5 = [cur_pose5[0]-0.055,cur_pose5[1],cur_pose5[2],0,3.14,cur_pose5[5]]
-    robot_ctrl.moveL(offset_pose5, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose5, 0.20, 0.20)
     time.sleep(0.3)
 
     cur_pose6 = robot_recv.getActualTCPPose()
     offset_pose6 = [cur_pose6[0]-0.055,cur_pose6[1],cur_pose6[2],2.221,-2.221,cur_pose6[5]]
-    robot_ctrl.moveL(offset_pose6, 0.05, 0.05)
+    robot_ctrl.moveL(offset_pose6, 0.20, 0.20)
     time.sleep(0.3)

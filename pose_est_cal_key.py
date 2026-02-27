@@ -3,14 +3,14 @@ import sys
 import time
 import warnings
 from types import SimpleNamespace
+import math
 
 import cv2
 import numpy as np
-from base_coordi import convert_cam_to_base
-from circle_move import circle_move_0, move_offset_0, circle_move_1, move_offset_1
+from base_coordi import convert_cam_to_base, cam_pose6_to_T
+from circle_move import circle_move_0, move_offset_0, circle_move_1, move_offset_1, compute_rotvec_lookat_vertical
 from ultralytics import YOLO
 import threading
-
 from rtde_control import RTDEControlInterface
 from rtde_receive import RTDEReceiveInterface
 
@@ -75,7 +75,7 @@ def _load_robot_poses_txt(path: str) -> list[dict[str, float]]:
 
     return poses
 
-def _normalize_depth_for_view(depth_m: np.ndarray, d_min_m: float = 0.1, d_max_m: float = 2.0) -> np.ndarray:
+def _normalize_depth_for_view(depth_m: np.ndarray, d_min_m: float = None, d_max_m: float = None) -> np.ndarray:
 
     if depth_m is None or depth_m.size == 0:
         return np.zeros((1, 1), dtype=np.uint8)
@@ -83,6 +83,13 @@ def _normalize_depth_for_view(depth_m: np.ndarray, d_min_m: float = 0.1, d_max_m
     invalid = ~np.isfinite(d) | (d <= 0)
     if np.all(invalid):
         return np.zeros(d.shape, dtype=np.uint8)
+    valid_vals = d[~invalid]
+    if d_min_m is None:
+        d_min_m = float(valid_vals.min())
+    if d_max_m is None:
+        d_max_m = float(valid_vals.max())
+    if d_max_m - d_min_m < 1e-6:
+        d_max_m = d_min_m + 0.1
     d = np.clip(d, d_min_m, d_max_m)
     d = (255.0 * (d_max_m - d) / (d_max_m - d_min_m)).astype(np.uint8)
     d[invalid] = 0
@@ -183,26 +190,39 @@ def _setup_foundationpose(args: SimpleNamespace):
 
     return est, to_origin, bbox, draw_posed_3d_box, draw_xyz_axis
 
-def compute_rotvec_lookat_vertical(cur, center):
-    cur = np.array(cur)
-    center = np.array(center)
+def _add_ui_border(combo: np.ndarray, pad: int = 100, scale: float = 1.0) -> np.ndarray:
+    """combo 이미지에 상하좌우 pad 픽셀 흰색 테두리를 추가하고, scale배 확대한 뒤 텍스트를 삽입한다."""
+    canvas = cv2.copyMakeBorder(combo, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+    new_w = int(canvas.shape[1] * scale)
+    new_h = int(canvas.shape[0] * scale)
+    canvas = cv2.resize(canvas, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
-    dir_vec = center - cur
-    dir_vec[2] = 0.0
-    dir_vec /= (np.linalg.norm(dir_vec) + 1e-12)
+    # 좌상단에 MakinaRocks 텍스트 (두껍게)
+    mr_text = "MakinaRocks"
+    mr_font = cv2.FONT_HERSHEY_SIMPLEX
+    mr_scale = 1.5
+    mr_thickness = 3
+    mr_color = (215, 119, 107)  # BGR (RGB 107,119,215)
+    (mr_w, mr_h), _ = cv2.getTextSize(mr_text, mr_font, mr_scale, mr_thickness)
+    x_offset = int(pad * scale)
+    mr_y = int(pad * scale * 0.5) + mr_h // 2  # 상단 패딩 세로 중앙
+    cv2.putText(canvas, mr_text, (x_offset, mr_y),
+                mr_font, mr_scale, mr_color, mr_thickness, cv2.LINE_AA)
 
-    z = np.array([0.0, 0.0, -1.0])
-    x = dir_vec
+    # 상측 중앙에 타이틀 텍스트 (MakinaRocks보다 약간 작게, 밑면 맞춤)
+    title_text = "Smart Welding Automation System"
+    title_font = cv2.FONT_HERSHEY_SIMPLEX
+    title_scale = 0.9
+    title_thickness = 2
+    title_color = (215, 119, 107)  # BGR (RGB 107,119,215)
+    (ttw, tth), _ = cv2.getTextSize(title_text, title_font, title_scale, title_thickness)
+    title_x = (canvas.shape[1] - ttw) // 2
+    title_y = mr_y  # MakinaRocks와 밑면(baseline) 일치
+    cv2.putText(canvas, title_text, (title_x, title_y),
+                title_font, title_scale, title_color, title_thickness, cv2.LINE_AA)
 
-    y = np.cross(z, x)
-    y /= (np.linalg.norm(y) + 1e-12)
+    return canvas
 
-    x = np.cross(y, z)
-
-    R = np.column_stack((x, y, z))
-
-    rotvec, _ = cv2.Rodrigues(R)
-    return rotvec.flatten()
 
 def run_pose_estimation(
     cam,
@@ -212,10 +232,10 @@ def run_pose_estimation(
     fy: float = 0.0,
     cx: float = -1.0,
     cy: float = -1.0,
-    out_width: int = 640,
-    out_height: int = 512,
+    out_width: int = 1280,
+    out_height: int = 1024,
     depth_scale: float = 0.001,
-    window_name: str = "Pose Est",
+    window_name: str = "MakinaRocks",
     est_refine_iter: int = 5,
     # on_pose=None,
     return_on_estimate: bool = True,
@@ -231,6 +251,10 @@ def run_pose_estimation(
     )
 
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    # 창 크기를 (이미지 너비 + 패딩) * 2배로 설정
+    _ui_w = int((out_width * 2 + 200) * 1.5)  # (RGB + Depth + 좌우패딩) * scale
+    _ui_h = int((out_height + 200) * 1.5)      # (높이 + 상하패딩) * scale
+    cv2.resizeWindow(window_name, _ui_w, _ui_h)
 
     K = None
     base_rgb = None
@@ -263,8 +287,8 @@ def run_pose_estimation(
     }
     # 로봇 capture pose move
     robot_ctrl.moveL(
-        [0.41750, 0.124807, 0.173820, 3.1416, 0.0, 0.0],
-        speed=0.15,acceleration=0.15,)
+        [0.400241,-0.089987,0.236343,1.781257,-1.780893,-0.703689],
+        speed=0.05,acceleration=0.05,)
     
     try:
         while True:
@@ -334,7 +358,7 @@ def run_pose_estimation(
 
                 cv2.putText(
                     combo_idle,
-                    "y: Detection | s: Pose | c: recapture | q: quit | r: ready robot | m: move robot",
+                    "c: recapture | y: Detection | s: Pose | r: ready robot | m: move robot | q: quit",
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
@@ -342,13 +366,13 @@ def run_pose_estimation(
                     2,
                 )
 
-                cv2.imshow(window_name, combo_idle)
+                cv2.imshow(window_name, _add_ui_border(combo_idle))
 
             elif show_mode == "yolo" and combo_yolo is not None:
-                cv2.imshow(window_name, combo_yolo)
+                cv2.imshow(window_name, _add_ui_border(combo_yolo))
 
             elif show_mode == "pose" and combo_pose is not None:
-                cv2.imshow(window_name, combo_pose)
+                cv2.imshow(window_name, _add_ui_border(combo_pose))
 
             key = cv2.waitKey(50) & 0xFF
 
@@ -428,6 +452,18 @@ def run_pose_estimation(
 
                 cv2.rectangle(vis_rgb, (x0, y0), (x1, y1), (0, 255, 255), 2)
 
+                # 바운딩 박스 중앙에 시료 라벨 표시
+                CLASS_TO_LABEL = {"a": "Target 1", "b": "Target 2"}
+                label_text = CLASS_TO_LABEL.get(detected_class, detected_class)
+                cx_box = (x0 + x1) // 2
+                cy_box = (y0 + y1) // 2
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.5
+                thickness = 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+                cv2.putText(vis_rgb, label_text, (cx_box - tw // 2, cy_box + th // 2),
+                            font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
                 vis_bgr = cv2.cvtColor(vis_rgb, cv2.COLOR_RGB2BGR)
                 combo_yolo = np.hstack([vis_bgr, depth_color])
 
@@ -486,55 +522,246 @@ def run_pose_estimation(
                     cam_pose6 = [last_pose_6d[k] for k in ("x", "y", "z", "roll", "pitch", "yaw")]
                 
                     p_base_cur = convert_cam_to_base(cam_pose6[0:3],tcp_pose)
-                    print(p_base_cur)
                     poses = _load_robot_poses_txt(ROBOT_POSES_TXT)
                     cap_pose = poses[0]
                     cap_pose = [cap_pose["x"], cap_pose["y"], cap_pose["z"],
                                 cap_pose["rx"], cap_pose["ry"], cap_pose["rz"]]
                     ready_pose = poses[1]
 
+
             if key == ord("r"):
                 print("로봇 이동 명령")
                 if detected_class == "a":
                     robot_ctrl.moveL(
                     [ready_pose["x"], ready_pose["y"], ready_pose["z"],ready_pose["rx"], ready_pose["ry"], ready_pose["rz"]],
-                    speed=0.1, acceleration=0.1,)
+                    speed=0.10, acceleration=0.10,)
                     time.sleep(0.5)
                     RADIUS = -0.047
 
                     start_pose = [p_base_cur[0] + RADIUS,p_base_cur[1],0.0365,ready_pose["rx"], ready_pose["ry"], ready_pose["rz"]]
                     
                     c_x, c_y, c_z = p_base_cur
-                    dt = 0.01
-                    T = 5.0
-                    print(start_pose)
+                    dt = 0.005
+                    T = 3.0
+                    # print(start_pose)
                     while True:
                         k2 = cv2.waitKey(0) & 0xFF   # 블로킹 대기
 
                         if k2 == ord("m"):
 
                             # 반시계 방향
-                            robot_ctrl.moveL(start_pose, speed=0.05, acceleration=0.05)
+                            robot_ctrl.moveL(start_pose, speed=0.15, acceleration=0.15)
                             time.sleep(0.5)
                             final_pose = circle_move_0(c_x, c_y, dt, T, RADIUS, robot_ctrl, start_pose)
                             move_offset_0(final_pose, dt, robot_ctrl, robot_recv)
 
                             # 시계 방향
-                            robot_ctrl.moveL(start_pose, speed=0.05, acceleration=0.05)
+                            robot_ctrl.moveL(start_pose, speed=0.15, acceleration=0.15)
                             time.sleep(0.5)
                             final_pose = circle_move_1(c_x, c_y, dt, T, RADIUS, robot_ctrl, start_pose)
                             move_offset_1(final_pose, dt, robot_ctrl, robot_recv)
 
-                            robot_ctrl.moveL(cap_pose, 0.05, 0.05)
+                            robot_ctrl.moveL(cap_pose, 0.10, 0.10)
 
                             break
 
                         elif k2 == 27:  # ESC
                             print("취소")
                             break
-                        
+
                 elif detected_class == "b":
-                    print("classb")
+
+                    if pose is None:
+                        print("pose가 없습니다. 먼저 's'로 포즈를 추정하세요.")
+                        continue
+
+                    robot_ctrl.moveL(
+                    [ready_pose["x"], ready_pose["y"], ready_pose["z"],ready_pose["rx"], ready_pose["ry"], ready_pose["rz"]],
+                    speed=0.10, acceleration=0.10,)
+                    time.sleep(0.5)
+
+                    cam_pose6_T = cam_pose6_to_T(cam_pose6)  #
+
+                    R = cam_pose6_T[:3, :3]     
+                    t = cam_pose6_T[:3, 3]
+
+                    half_w = 0.075 / 2.0 
+                    half_h = 0.200 / 2.0 
+
+                    corners_cam = [
+                        t + np.array([-half_w, -half_h, 0.0], dtype=np.float32),
+                        t + np.array([ half_w, -half_h, 0.0], dtype=np.float32),
+                        t + np.array([ half_w,  half_h, 0.0], dtype=np.float32),
+                        t + np.array([-half_w,  half_h, 0.0], dtype=np.float32),
+                    ]
+
+                    # visualize corners
+                    # for corner in corners_cam:
+                    #     p = K @ corner
+                    #     u = int(p[0] / p[2])
+                    #     v = int(p[1] / p[2])
+                    #     cv2.circle(vis_bgr_pose, (u, v), 5, (0, 0, 255), -1)
+                    # cv2.imwrite("estimated_pose.png", vis_bgr_pose)
+                    
+                    # point rotation
+                    axis_y = R[:, 1]           
+                    scale = 0.1               
+
+                    p0_3d = t                   
+                    p1_3d = t + scale * axis_y  
+
+                    # 3D -> 2D 투영 (동차좌표)
+                    p0 = K @ p0_3d
+                    p1 = K @ p1_3d
+
+                    u0, v0 = p0[0] / p0[2], p0[1] / p0[2]
+                    u1, v1 = p1[0] / p1[2], p1[1] / p1[2]
+
+                    dx = u1 - u0
+                    dy = v1 - v0
+    
+                    angle_rad = math.atan2(dy, dx)
+                    angle_deg_img = math.degrees(angle_rad)
+
+                    # print(angle_deg_img)
+
+                    rot_rad = math.radians(angle_deg_img)
+                    cos_a = math.cos(rot_rad)
+                    sin_a = math.sin(rot_rad)
+
+                    rotated_corners_cam = []
+                    for corner in corners_cam:
+                        dx = corner[0] - t[0]
+                        dy = corner[1] - t[1]
+                        rx = cos_a * dx - sin_a * dy + t[0]
+                        ry = sin_a * dx + cos_a * dy + t[1]
+                        rotated_corners_cam.append(np.array([rx, ry, corner[2]], dtype=np.float32))
+
+                    # print(corners_cam)
+                    # print(rotated_corners_cam)
+
+                    # visualize rotated corners
+                    # for rc in rotated_corners_cam:
+                    #     p = K @ rc
+                    #     u = int(p[0] / p[2])
+                    #     v = int(p[1] / p[2])
+                    #     cv2.circle(vis_bgr_pose, (u, v), 5, (0, 255, 255), -1)
+                    # cv2.imwrite("estimated_pose_rotated.png", vis_bgr_pose)
+
+                    rotated_corners_base = []
+                    for rc in rotated_corners_cam:
+                        p_base = convert_cam_to_base(rc, tcp_pose)
+                        rotated_corners_base.append(p_base)
+
+                    rotated_corners_base.sort(key=lambda p: p[0])
+
+                    center_base = p_base_cur  
+                    edge_pairs = [(0, 1), (1, 3), (0, 2), (2, 3)]
+                    edge_rvs = []
+                    for idx, (a, b) in enumerate(edge_pairs):
+                        p0 = rotated_corners_base[a]
+                        p1 = rotated_corners_base[b]
+                        mid = [(p0[0] + p1[0]) / 2.0,
+                               (p0[1] + p1[1]) / 2.0,
+                               0.080]
+                        dx_m = mid[0] - center_base[0]
+                        dy_m = mid[1] - center_base[1]
+                        virtual_cur = [center_base[0] + dy_m,
+                                       center_base[1] - dx_m,
+                                       0.080]
+                        rv = compute_rotvec_lookat_vertical(virtual_cur, [center_base[0], center_base[1], 0.080])
+                        edge_rvs.append(rv)
+                        # print(f"edge {a}-{b}: rx={rv[0]:.4f}, ry={rv[1]:.4f}, rz={rv[2]:.4f}")
+
+                    # rotated_corners_base, edge_rvs
+
+                    OFFSET_M = 0.004  # 4mm
+                    center_xy = np.array([center_base[0], center_base[1]])
+                    offset_paths = []  
+                    for idx, (a, b) in enumerate(edge_pairs):
+                        pa = np.array(rotated_corners_base[a][:2])
+                        pb = np.array(rotated_corners_base[b][:2])
+                        edge_dir = pb - pa
+                        normal = np.array([-edge_dir[1], edge_dir[0]])
+                        normal = normal / (np.linalg.norm(normal) + 1e-12)
+                        mid_xy = (pa + pb) / 2.0
+                        if np.dot(normal, mid_xy - center_xy) < 0:
+                            normal = -normal
+                        pa_off = pa + OFFSET_M * normal
+                        pb_off = pb + OFFSET_M * normal
+                        offset_paths.append((pa_off, pb_off))
+                        print(f"path {a}-{b}: start=({pa_off[0]:.5f}, {pa_off[1]:.5f}) end=({pb_off[0]:.5f}, {pb_off[1]:.5f})")
+
+                    # [x, y, z, rx, ry, rz]
+                    Z_HEIGHT = 0.0375
+                    full_paths = []  
+                    for idx, ((pa_off, pb_off), rv) in enumerate(zip(offset_paths, edge_rvs)):
+                        start_6d = [pa_off[0], pa_off[1], Z_HEIGHT, rv[0], rv[1], rv[2]]
+                        end_6d   = [pb_off[0], pb_off[1], Z_HEIGHT, rv[0], rv[1], rv[2]]
+                        full_paths.append((start_6d, end_6d))
+                        print(f"path {idx}: start={[f'{v:.5f}' for v in start_6d]} end={[f'{v:.5f}' for v in end_6d]}")
+
+                    while True:
+                        k2 = cv2.waitKey(0) & 0xFF   # 블로킹 대기
+
+                        if k2 == ord("m"):
+
+                            # path 0 이동
+                            robot_ctrl.moveL(full_paths[0][0], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(full_paths[0][1], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+
+                            # path 1 이동
+                            robot_ctrl.moveL(full_paths[1][0], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(full_paths[1][1], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+
+                            # offset 이동
+                            cur_pose = robot_recv.getActualTCPPose()
+                            robot_ctrl.moveL([cur_pose[0], cur_pose[1], cur_pose[2]+0.05, cur_pose[3], cur_pose[4], cur_pose[5]], speed=0.20, acceleration=0.20)
+                            time.sleep(0.5)
+                            cur_pose = robot_recv.getActualTCPPose()
+                            robot_ctrl.moveL([cur_pose[0]-0.1, cur_pose[1], cur_pose[2], full_paths[0][1][3], full_paths[0][1][4], full_paths[0][1][5]], speed=0.20, acceleration=0.20)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(
+                            [ready_pose["x"], ready_pose["y"], ready_pose["z"],ready_pose["rx"], ready_pose["ry"], ready_pose["rz"]],
+                            speed=0.20, acceleration=0.20,)
+                            time.sleep(0.5)
+
+                            # path 2 이동
+                            robot_ctrl.moveL(full_paths[2][0], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(full_paths[2][1], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+
+                            # path 3 이동
+                            robot_ctrl.moveL(full_paths[3][0], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(full_paths[3][1], speed=0.10, acceleration=0.10)
+                            time.sleep(0.5)
+
+                            # offset 이동
+                            cur_pose = robot_recv.getActualTCPPose()
+                            robot_ctrl.moveL([cur_pose[0], cur_pose[1], cur_pose[2]+0.05, cur_pose[3], cur_pose[4], cur_pose[5]], speed=0.20, acceleration=0.20)
+                            time.sleep(0.5)
+                            cur_pose = robot_recv.getActualTCPPose()
+                            robot_ctrl.moveL([cur_pose[0]-0.1, cur_pose[1], cur_pose[2], full_paths[2][1][3], full_paths[2][1][4], full_paths[2][1][5]], speed=0.20, acceleration=0.20)
+                            time.sleep(0.5)
+                            robot_ctrl.moveL(
+                            [ready_pose["x"], ready_pose["y"], ready_pose["z"],ready_pose["rx"], ready_pose["ry"], ready_pose["rz"]],
+                            speed=0.20, acceleration=0.20,)
+                            time.sleep(0.5)
+
+                            # 캡처 포즈로 복귀
+                            robot_ctrl.moveL(cap_pose, 0.10, 0.10)
+
+                            break
+
+                        elif k2 == 27:  # ESC
+                            print("취소")
+                            break
 
 
     finally:

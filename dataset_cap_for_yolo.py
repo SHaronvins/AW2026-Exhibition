@@ -1,56 +1,26 @@
-# from camera import MechEyeCamera
-# import os
-# import time
-# from datetime import datetime
-# import cv2
-# import numpy as np
-
-# SAVE_DIR = './dataset'
-# os.makedirs(SAVE_DIR, exist_ok=True)
-
-# cam = MechEyeCamera()
-# cam.connect(None)
-
-# try:
-# 	idx = 0
-# 	while True:
-# 		rgb, depth, _ = cam.capture_textured_point_cloud()
-# 		rgb_path = os.path.join(SAVE_DIR, f'rgb_{idx:06d}.png')
-# 		depth_path = os.path.join(SAVE_DIR, f'depth_{idx:06d}.png')
-# 		# RGB 저장 (cv2는 BGR이므로 변환)
-# 		if rgb is not None:
-# 			if rgb.shape[-1] == 3:
-# 				cv2.imwrite(rgb_path, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-# 			else:
-# 				cv2.imwrite(rgb_path, rgb)
-
-# 		print(f'Saved: {rgb_path}, {depth_path}')
-# 		idx += 1
-# 		time.sleep(1)
-# except KeyboardInterrupt:
-# 	print('Stopped by user.')
-
 from camera import MechEyeCamera
 import os
 import time
 from datetime import datetime
 
 import cv2
-import numpy as np
 from ultralytics import YOLO
 
 # ===============================
 # 설정
 # ===============================
 
-MODEL_PATH = "./best.pt"   # 학습된 모델
-RESULT_DIR = "./result_live"
+SAVE_DIR = "./dataset/rgb"
+RESULT_DIR = "./dataset/results"
+
+os.makedirs(SAVE_DIR, exist_ok=True)
 os.makedirs(RESULT_DIR, exist_ok=True)
 
 CAPTURE_INTERVAL = 3.0  # 초
 
+MODEL_PATH = "./best.pt"
 IMG_SIZE = 1024
-CONF_THRES = 0.1
+CONF_THRES = 0.25
 IOU_THRES = 0.7
 
 # ===============================
@@ -78,7 +48,7 @@ try:
         # ---------------------------
         # 📷 캡처
         # ---------------------------
-        rgb, depth, _ = cam.capture_textured_point_cloud()
+        rgb, _, _ = cam.capture_textured_point_cloud()
 
         if rgb is None:
             print("[WARN] RGB capture failed")
@@ -89,6 +59,12 @@ try:
             frame = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         else:
             frame = rgb.copy()
+
+        # ---------------------------
+        # 💾 원본 저장
+        # ---------------------------
+        rgb_path = os.path.join(SAVE_DIR, f"rgb_{idx:06d}.png")
+        cv2.imwrite(rgb_path, frame)
 
         # ---------------------------
         # 🔍 YOLO 추론
@@ -105,15 +81,15 @@ try:
         r = results[0]
 
         # ---------------------------
-        # 🖼 Overlay 결과
+        # 🖼 결과 overlay
         # ---------------------------
         overlay = r.plot()
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_path = os.path.join(RESULT_DIR, f"result_{idx:06d}.png")
-        cv2.imwrite(out_path, overlay)
+        result_path = os.path.join(RESULT_DIR, f"result_{idx:06d}.png")
+        cv2.imwrite(result_path, overlay)
 
-        print(f"💾 Saved result: {out_path}")
+        print(f"💾 Saved RGB: {rgb_path}")
+        print(f"🔍 Saved Result: {result_path}")
 
         idx += 1
 

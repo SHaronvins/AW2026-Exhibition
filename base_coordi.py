@@ -8,9 +8,9 @@ from scipy.spatial.transform import Rotation
 # Hand–Eye (TCP -> Camera)
 # ===============================
 T_TCP_CAM = np.array([
-    [0.00926773, -0.99941872, -0.03280759, 0.07539392],
-    [0.99285868, 0.01309933, -0.11857510, 0.22510953],
-    [0.11893593, -0.03147438, 0.99240295, -0.35042392],
+    [0.99365086, -0.00336135, -0.11245740, 0.02518853],
+    [-0.07998690, 0.68182636, -0.72712785, 0.09027294],
+    [0.07912055, 0.73150633, 0.67722849, -0.19702249],
     [0.00000000, 0.00000000, 0.00000000, 1.00000000],
 ], dtype=np.float64)
 
@@ -103,54 +103,18 @@ def convert_cam_to_base(
 
     return p_base
 
-# def convert_ref_and_cur_to_base(
-#     reference_txt_path: str,
-#     cur_cam_pose_xyz,
-#     cur_robot_pose6,
+# def convert_cam_to_base_4_corners(
+#     cam_pose_xyz_list,
+#     robot_pose6,
 # ):
+#     return [convert_cam_to_base(cam_pose_xyz, robot_pose6) for cam_pose_xyz in cam_pose_xyz_list]
 
-#     cam_pose6_ref = None
-#     rob_pose6_ref = None
-
-#     with open(reference_txt_path, "r") as f:
-#         for line in f:
-#             line = line.strip()
-
-#             # 빈줄 / 주석 스킵
-#             if not line or line.startswith("#"):
-#                 continue
-
-#             vals = [float(v) for v in line.replace(" ", "").split(",")]
-
-#             if cam_pose6_ref is None:
-#                 cam_pose6_ref = vals    
-#             else:
-#                 rob_pose6_ref = vals
-#                 break
-
-#     if cam_pose6_ref is None or rob_pose6_ref is None:
-#         raise RuntimeError(f"Reference txt format invalid: {reference_txt_path}")
-
-#     cam_pose_xyz_ref = cam_pose6_ref[:3]
-#     T_base_tcp_ref = robot_pose6_to_T(rob_pose6_ref)
-
-#     p_cam_ref = np.asarray(cam_pose_xyz_ref, dtype=np.float64).reshape(3)
-#     p_cam_h_ref = np.array(
-#         [p_cam_ref[0], p_cam_ref[1], p_cam_ref[2], 1.0],
-#         dtype=np.float64,
-#     )
-
-#     p_base_ref_h = T_base_tcp_ref @ T_TCP_CAM @ p_cam_h_ref
-#     p_base_ref = p_base_ref_h[:3]
-#     T_base_tcp_cur = robot_pose6_to_T(cur_robot_pose6)
-
-#     p_cam_cur = np.asarray(cur_cam_pose_xyz, dtype=np.float64).reshape(3)
-#     p_cam_h_cur = np.array(
-#         [p_cam_cur[0], p_cam_cur[1], p_cam_cur[2], 1.0],
-#         dtype=np.float64,
-#     )
-
-#     p_base_cur_h = T_base_tcp_cur @ T_TCP_CAM @ p_cam_h_cur
-#     p_base_cur = p_base_cur_h[:3]
-
-#     return p_base_ref, p_base_cur
+# def base_6dof(cam_pose_6dof, robot_pose6):
+#     T_base_tcp = robot_pose6_to_T(robot_pose6)
+#     T_cam_obj = cam_pose6_to_T(cam_pose_6dof)
+#     T_base_obj = T_base_tcp @ T_TCP_CAM @ T_cam_obj
+#     # make 6 dof
+#     R_base_obj = T_base_obj[:3, :3]
+#     p_base = T_base_obj[:3, 3]
+#     # 6축
+#     return p_base, R_base_obj

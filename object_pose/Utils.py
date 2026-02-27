@@ -752,7 +752,6 @@ def draw_posed_3d_box(K, img, ob_in_cam, bbox, line_color=(0,255,0), linewidth=2
 
   return img
 
-
 def projection_matrix_from_intrinsics(K, height, width, znear, zfar, window_coords='y_down'):
   """Conversion of Hartley-Zisserman intrinsic matrix to OpenGL proj. matrix.
 
